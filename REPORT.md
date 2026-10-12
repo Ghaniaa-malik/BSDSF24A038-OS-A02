@@ -48,3 +48,22 @@ uses 80. A fixed width alone could wrap badly in a narrow terminal or waste spac
 in a wide one. Tests attach stdout to pseudo-terminals of widths 1, 9, 18 and 80.
 The assignment asks for fixed-width cells; GNU ls can pack variable-width columns
 more tightly, so identical spacing is not promised for every directory.
+
+## Feature 4: Horizontal columns (v1.3.0)
+
+### 5. Vertical versus horizontal complexity
+
+Both modes scan names to find the maximum cell width and use the terminal width
+to compute the number of columns. Vertical layout additionally needs the final
+file count and row count before its first output, because each next column is a
+stride of rows away in the array. Horizontal layout walks consecutive indices,
+printing a newline whenever `(index + 1) % columns == 0`, or at the final item.
+Both printing algorithms are O(n); vertical order needs more layout pre-calculation.
+
+### 6. Selecting a display mode
+
+An enum, DisplayMode, holds VERTICAL, LONG or HORIZONTAL. VERTICAL is the default.
+getopt processes each option in order: -l sets LONG and -x sets HORIZONTAL, so the
+last display option wins, including combined flags (-xl means long; -lx means
+horizontal). display() dispatches once to show_long(), show_horizontal() or
+show_vertical(). A later independent recursive_flag can combine with any layout.

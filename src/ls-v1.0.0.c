@@ -19,7 +19,8 @@
 #include <sys/sysmacros.h>
 #include <sys/ioctl.h>
 
-static int long_format;
+typedef enum { VERTICAL, LONG, HORIZONTAL } DisplayMode;
+static DisplayMode display_mode = VERTICAL;
 static int exit_status;
 void do_ls(const char *dir);
 
@@ -220,18 +221,32 @@ static void show_vertical(char **names, size_t count, const char *base)
     }
 }
 
+static void show_horizontal(char **names, size_t count, const char *base)
+{
+    if (!count) return;
+    size_t width = column_width(names, count);
+    size_t columns = column_count(width, count);
+    for (size_t index = 0; index < count; ++index) {
+        int last = (index + 1) % columns == 0 || index + 1 == count;
+        print_cell(names, index, base, width, !last);
+        if (last) putchar('\n');
+    }
+}
+
 static void display(char **names, size_t count, const char *base)
 {
-    if (long_format) show_long(names, count, base);
+    if (display_mode == LONG) show_long(names, count, base);
+    else if (display_mode == HORIZONTAL) show_horizontal(names, count, base);
     else show_vertical(names, count, base);
 }
 
 int main(int argc, char *argv[])
 {
     int option;
-    while ((option = getopt(argc, argv, "l")) != -1) {
-        if (option == 'l') long_format = 1;
-        else { fprintf(stderr, "Usage: %s [-l] [FILE|DIRECTORY ...]\n", argv[0]); return 2; }
+    while ((option = getopt(argc, argv, "lx")) != -1) {
+        if (option == 'l') display_mode = LONG;
+        else if (option == 'x') display_mode = HORIZONTAL;
+        else { fprintf(stderr, "Usage: %s [-lx] [FILE|DIRECTORY ...]\n", argv[0]); return 2; }
     }
     if (optind == argc) do_ls(".");
     else for (int i = optind; i < argc; ++i) {
