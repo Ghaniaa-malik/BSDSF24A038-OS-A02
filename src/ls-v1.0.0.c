@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <sys/sysmacros.h>
+#include <sys/ioctl.h>
 
 static int long_format;
 static int exit_status;
@@ -176,15 +177,53 @@ static void show_long(char **names, size_t count, const char *base)
     free(rows);
 }
 
+/* ANSI sequences are printed separately and never count toward padding. */
+static size_t column_width(char **names, size_t count)
+{
+    size_t longest = 0;
+    for (size_t i = 0; i < count; ++i)
+        if (strlen(names[i]) > longest) longest = strlen(names[i]);
+    return longest + 2;
+}
+
+static size_t column_count(size_t width, size_t count)
+{
+    struct winsize window;
+    size_t terminal_width = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &window) == 0 && window.ws_col)
+        terminal_width = window.ws_col;
+    size_t columns = terminal_width / width;
+    if (!columns) columns = 1;
+    if (columns > count) columns = count;
+    return columns;
+}
+
+static void print_cell(char **names, size_t index, const char *base, size_t width, int pad)
+{
+    char *path = make_path(base, names[index]);
+    print_name(names[index], path);
+    free(path);
+    if (pad)
+        for (size_t n = strlen(names[index]); n < width; ++n) putchar(' ');
+}
+
+static void show_vertical(char **names, size_t count, const char *base)
+{
+    if (!count) return;
+    size_t width = column_width(names, count);
+    size_t columns = column_count(width, count);
+    size_t rows = count / columns + (count % columns != 0);
+    for (size_t row = 0; row < rows; ++row) {
+        for (size_t index = row; index < count; index += rows)
+            print_cell(names, index, base, width, index + rows < count);
+        putchar('\n');
+    }
+}
+
 static void display(char **names, size_t count, const char *base)
 {
     if (long_format) show_long(names, count, base);
-    else for (size_t i = 0; i < count; ++i) {
-        char *path = make_path(base, names[i]);
-        print_name(names[i], path);
-        putchar('\n');
-        free(path);
-    }
+    else show_vertical(names, count, base);
 }
 
 int main(int argc, char *argv[])

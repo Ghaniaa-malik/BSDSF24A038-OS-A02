@@ -26,3 +26,25 @@ Long listing first gathers metadata and finds maximum field widths, then prints
 aligned rows. getpwuid/getgrgid supply names; unresolved IDs fall back to decimal.
 ctime supplies the modification date, with the year shown for old/future files.
 Linux st_blocks counts 512-byte units, so total is converted to 1 KiB units.
+
+## Feature 3: Down-then-across columns (v1.2.0)
+
+### 3. Vertical indexing and why a simple loop is insufficient
+
+First collect all names to know the count n and longest name. Use cell width
+`w = longest + 2`, `columns = max(1, terminal_width / w)` (capped at n), and
+`rows = ceil(n / columns)`. At output row r, indices are r, r + rows,
+r + 2*rows, and so on, stopping at n. For seven names and three columns the
+rows are `a d g`, `b e`, `c f`. A direct loop printing consecutive indices on
+each row would instead produce horizontal order. Empty directories return before
+any division; a filename wider than the terminal uses a single column.
+
+### 4. ioctl and the fallback
+
+`ioctl(STDOUT_FILENO, TIOCGWINSZ, &window)` asks the terminal driver for its current
+size. ws_col provides the usable column count, so resizing changes the layout on
+the next invocation. For redirected output or a failed/zero-width query, the code
+uses 80. A fixed width alone could wrap badly in a narrow terminal or waste space
+in a wide one. Tests attach stdout to pseudo-terminals of widths 1, 9, 18 and 80.
+The assignment asks for fixed-width cells; GNU ls can pack variable-width columns
+more tightly, so identical spacing is not promised for every directory.
