@@ -220,6 +220,67 @@ class ListingTests(unittest.TestCase):
         finally:
             p.chmod(0o700)
 
+    def test_long_symlink_target(self):
+        target = 'missing_' * 30
+        (self.base / 'longlink').symlink_to(target)
+        self.assertIn(' -> ' + target, self.run_ls('-l', 'longlink').stdout)
+
+    def test_future_timestamp(self):
+        p = self.base / 'future'
+        p.touch()
+        os.utime(p, (4102444800, 4102444800))
+        expected = subprocess.check_output(['/bin/ls', '-l', 'future'], cwd=self.base,
+                                           env=ENV, text=True)
+        self.assertEqual(ANSI.sub('', self.run_ls('-l', 'future').stdout), expected)
+
+    def test_dash_operand(self):
+        (self.base / '-file').touch()
+        self.assertIn('-file', self.run_ls('--', '-file').stdout)
+
+    def test_output_error(self):
+        (self.base / 'file').touch()
+        with open('/dev/full', 'w') as full:
+            p = subprocess.run([BIN], cwd=self.base, env=ENV, stdout=full,
+                               stderr=subprocess.PIPE, timeout=10)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_large_directory(self):
+        names = ['item_%04d' % i for i in range(1000)]
+        for name in reversed(names):
+            (self.base / name).touch()
+        self.assertEqual(self.run_ls('-x').stdout.split(), names)
+        self.assertEqual(len(self.run_ls('-l').stdout.splitlines()), 1001)
+
+    def test_recursive_empty(self):
+        self.assertEqual(self.run_ls('-R').stdout, '.:\n')
+        self.assertEqual(self.run_ls('-lR').stdout, '.:\ntotal 0\n')
+
+    def test_recursive_error_continues(self):
+        if os.geteuid() == 0:
+            self.skipTest('root bypasses directory permissions')
+        denied = self.base / 'a-denied'
+        denied.mkdir()
+        denied.chmod(0)
+        (self.base / 'b-allowed').mkdir()
+        (self.base / 'b-allowed' / 'marker').touch()
+        try:
+            p = self.run_ls('-R', check=False)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn('a-denied', p.stderr)
+            self.assertIn('marker', p.stdout)
+        finally:
+            denied.chmod(0o700)
+
+    def test_archive_suffixes_and_executable_priority(self):
+        for name in ['a.tar', 'b.gz', 'c.zip', 'd.zip.txt']:
+            (self.base / name).touch()
+        (self.base / 'executable.tar').touch(mode=0o755)
+        out = self.run_ls('-x').stdout
+        for name in ['a.tar', 'b.gz', 'c.zip']:
+            self.assertIn('\x1b[0;31m' + name + '\x1b[0m', out)
+        self.assertIn('\x1b[0;32mexecutable.tar\x1b[0m', out)
+        self.assertNotIn('\x1b[0;31md.zip.txt', out)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
