@@ -29,4 +29,9 @@ jobs:
           make CFLAGS='-std=c11 -Wall -Wextra -Wpedantic -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie' LDFLAGS='-fsanitize=address,undefined -no-pie'
           make test
       - name: Check manual syntax
-        run: groff -man -Tutf8 man/ls.1 > /dev/null
+        run: |
+          groff -man -Tutf8 man/ls.1 > /dev/null 2> /tmp/a02-man-warnings
+          if test -s /tmp/a02-man-warnings; then
+            cat /tmp/a02-man-warnings
+            exit 1
+          fi
