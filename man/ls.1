@@ -1,0 +1,58 @@
+.TH STUDENT-LS 1 "October 2026" "1.6.0" "User Commands"
+.SH NAME
+student-ls \- list directory contents for Operating Systems PA-02
+.SH SYNOPSIS
+.B ./bin/ls
+.RB [ \-lxR ]
+.RI [ FILE|DIRECTORY ... ]
+.SH DESCRIPTION
+List non-hidden directory entries in case-sensitive byte order.
+With no operand, list the current directory.
+The default layout fills columns down, then across.
+Column width is the longest filename plus two spaces.
+The terminal width is detected with ioctl; the fallback is 80 columns.
+.SH OPTIONS
+.TP
+.B \-l
+Use aligned long format: permissions, link count, owner, group, size,
+modification time and filename. Symbolic links include their targets.
+.TP
+.B \-x
+Fill columns across, then down. The last of \-l and \-x wins.
+.TP
+.B \-R
+List child directories recursively after the current listing.
+Symbolic links to directories are not followed.
+.TP
+.B \-\-
+End option parsing, allowing operands beginning with a hyphen.
+.SH COLORS
+Directories are blue, executable regular files green, archives ending in
+.tar, .gz or .zip red, symbolic links pink/magenta, and special files reverse video.
+Colors are also emitted when output is redirected. Executable bits take
+precedence over archive extensions.
+.SH EXIT STATUS
+0 on success; 1 on filesystem or output errors; 2 for invalid options.
+.SH LIMITATIONS
+This is an educational subset of GNU ls. Hidden-file options, locale collation,
+ACL markers, shell quoting and Unicode display-cell measurement are not implemented.
+Filename lengths are measured in bytes. Symbolic-link operands are displayed
+as links rather than followed. Filesystem races and mount cycles are not handled
+as comprehensively as in GNU coreutils.
+.SH EXAMPLES
+.nf
+make
+./bin/ls
+./bin/ls -l src
+./bin/ls -x .
+./bin/ls -lR src
+man -l man/ls.1
+.fi
+.SH AUTHOR
+Ghania Malik, BSDSF24A038.
+Based on the ls starter provided by Muhammad Arif Butt.
+.SH SEE ALSO
+.BR ls (1),
+.BR lstat (2),
+.BR readdir (3),
+.BR qsort (3)

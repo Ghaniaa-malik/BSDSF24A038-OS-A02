@@ -115,3 +115,65 @@ bit. The OR constructs a mask; AND retains only those bits. This describes the
 file's mode, not whether the current user can execute it: ACLs, mount options and
 credentials can change effective access. Check regular-file type first, because
 execute bits on a directory represent search/traversal, and directories stay blue.
+
+## Feature 7: Recursive listing (v1.6.0)
+
+### 11. The base case
+
+A base case is a condition that ends a recursive branch without another recursive
+call. Here a directory containing no eligible child directories makes no further
+calls, then frees its names and returns. Empty directories therefore terminate
+immediately after display. Non-directory entries are never recursed into. Hidden
+entries (including . and ..) are skipped, and the recursive loop also explicitly
+excludes `.` and `..`. lstat plus S_ISDIR prevents following symbolic links, including
+links to ancestors. An unreadable directory reports an error and returns, while
+other readable directories continue. Memory and call-stack use grow with directory
+depth; the implementation is intended for ordinary static directory trees.
+
+### 12. Full paths and the working directory
+
+Opening a directory does not change the process working directory. Inside
+`do_ls("parent_dir")`, calling `do_ls("subdir")` would resolve subdir against the
+original working directory, potentially listing an unrelated directory or failing.
+make_path allocates enough space for the parent, optional slash, child and NUL.
+Both lstat and the recursive call receive that same full path. No chdir is needed,
+so sibling traversal and multiple initial operands remain correct.
+
+The parent listing is completed before recursive descent, then children are
+visited in sorted depth-first order with a header and blank separator. The PDF
+mentions descending inside the display loop, but doing so interleaves child
+headers with unfinished parent columns. A separate traversal of the same sorted
+array satisfies the stated requirement to match GNU ls -R's output structure.
+
+## Final validation and design boundaries
+
+Every feature branch was built on Ubuntu 24.04 with GCC, using -Wall, -Wextra,
+-Wpedantic and -Werror. The version-aware Python integration suite compares long
+format to GNU ls, checks special permission bits and devices, uses real symlinks,
+a FIFO and a Unix socket, and sets pseudo-terminal widths to verify column order.
+It checks all display modes, sorting, color resets, recursion, empty directories,
+long names, missing paths and permission errors. Tests for later features are
+skipped on earlier versions. Release binaries come from passing Ubuntu CI runs,
+not Windows executables. Each release links to its build/test run.
+
+The final workflow also rebuilds with AddressSanitizer and UndefinedBehaviorSanitizer
+and runs the full suite again. `make test` reproduces functional tests on Linux.
+The compiled release asset is the normal optimized build, not the sanitizer build.
+
+This implementation intentionally follows the assignment's subset: no -a option,
+locale-aware sorting, ACL marker, filename quoting or Unicode display-width logic.
+Lengths are byte counts. It does not aim to duplicate every GNU ls option or its
+variable-width column packing. Memory allocation failure terminates with an error;
+ordinary path errors allow subsequent operands to continue. Directory symlink
+operands themselves are shown, not followed. A concurrently changing filesystem
+may produce errors; bind-mount cycles are outside this educational scope.
+
+## Viva preparation
+
+Trace a seven-name directory through main, do_ls, compare_names, display and each
+printing mode. Explain why names are copied, why lstat is needed, how enum option
+state differs from the recursive flag, why rows determine vertical strides, how
+ANSI codes differ from visible width, and when each allocation is freed. Then
+trace parent/child path construction and an ancestor symlink. The student must
+watch the required instructor video and understand the submitted code; neither
+video viewing nor viva readiness is claimed by automated validation.

@@ -22,6 +22,9 @@
 typedef enum { VERTICAL, LONG, HORIZONTAL } DisplayMode;
 static DisplayMode display_mode = VERTICAL;
 static int exit_status;
+static int recursive_flag;
+static int directory_header;
+static int printed_directory;
 void do_ls(const char *dir);
 
 static void fail(const char *path)
@@ -265,17 +268,15 @@ static void display(char **names, size_t count, const char *base)
 int main(int argc, char *argv[])
 {
     int option;
-    while ((option = getopt(argc, argv, "lx")) != -1) {
+    while ((option = getopt(argc, argv, "lxR")) != -1) {
         if (option == 'l') display_mode = LONG;
         else if (option == 'x') display_mode = HORIZONTAL;
-        else { fprintf(stderr, "Usage: %s [-lx] [FILE|DIRECTORY ...]\n", argv[0]); return 2; }
+        else if (option == 'R') recursive_flag = 1;
+        else { fprintf(stderr, "Usage: %s [-lxR] [FILE|DIRECTORY ...]\n", argv[0]); return 2; }
     }
+    directory_header = argc - optind > 1;
     if (optind == argc) do_ls(".");
     else for (int i = optind; i < argc; ++i) {
-        if (argc - optind > 1) {
-            if (i > optind) putchar('\n');
-            printf("%s:\n", argv[i]);
-        }
         do_ls(argv[i]);
     }
     if (fflush(stdout) == EOF) { perror("ls: stdout"); return 1; }
@@ -301,6 +302,11 @@ void do_ls(const char *dir)
     }
     DIR *dp = opendir(dir);
     if (!dp) { fail(dir); return; }
+    if (recursive_flag || directory_header) {
+        if (printed_directory) putchar('\n');
+        printf("%s:\n", dir);
+    }
+    printed_directory = 1;
     char **names = NULL;
     size_t count = 0, capacity = 0;
     struct dirent *entry;
@@ -324,6 +330,18 @@ void do_ls(const char *dir)
     if (closedir(dp) < 0) fail(dir);
     if (count > 1) qsort(names, count, sizeof *names, compare_names);
     display(names, count, dir);
+    /* Finish this directory's listing before descending, as GNU ls does.
+       A separate traversal avoids interleaving child headers with parent rows. */
+    if (recursive_flag) {
+        for (size_t i = 0; i < count; ++i) {
+            if (!strcmp(names[i], ".") || !strcmp(names[i], "..")) continue;
+            char *path = make_path(dir, names[i]);
+            struct stat child;
+            if (lstat(path, &child) < 0) fail(path);
+            else if (S_ISDIR(child.st_mode)) do_ls(path);
+            free(path);
+        }
+    }
     for (size_t i = 0; i < count; ++i) free(names[i]);
     free(names);
 }

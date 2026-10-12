@@ -20,3 +20,13 @@ jobs:
         with:
           name: ls-linux-x86_64
           path: bin/ls
+      - name: Memory and undefined-behavior checks
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          make clean
+          make CFLAGS='-std=c11 -Wall -Wextra -Wpedantic -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie' LDFLAGS='-fsanitize=address,undefined -no-pie'
+          make test
+      - name: Check manual syntax
+        run: groff -man -Tutf8 man/ls.1 > /dev/null
