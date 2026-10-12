@@ -1,12 +1,8 @@
 /*
-* Programming Assignment 02: lsv1.0.0
-* This is the source file of version 1.0.0
-* Read the write-up of the assignment to add the features to this base version
-* Usage:
-*       $ lsv1.0.0 
-*       % lsv1.0.0  /home
-*       $ lsv1.0.0  /home/kali/   /etc/
-*/
+ * Programming Assignment 02: extensions to Arif Butt's lsv1.0.0.
+ * Keep the original main -> do_ls -> opendir/readdir/closedir flow.
+ * See the initial setup commit for the unmodified instructor source.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,50 +10,235 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <sys/sysmacros.h>
 
-extern int errno;
-
+static int long_format;
+static int exit_status;
 void do_ls(const char *dir);
 
-int main(int argc, char const *argv[])
+static void fail(const char *path)
 {
-    if (argc == 1)
-    {
-        do_ls(".");
-    }
+    fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+    exit_status = 1;
+}
+
+static void *allocate(size_t bytes)
+{
+    void *p = malloc(bytes ? bytes : 1);
+    if (!p) { perror("ls: malloc"); exit(EXIT_FAILURE); }
+    return p;
+}
+
+static char *copy_string(const char *s)
+{
+    char *p = allocate(strlen(s) + 1);
+    strcpy(p, s);
+    return p;
+}
+
+/* NULL base denotes an explicit file operand, already a complete path. */
+static char *make_path(const char *base, const char *name)
+{
+    if (!base) return copy_string(name);
+    size_t a = strlen(base), b = strlen(name);
+    if (a > SIZE_MAX - b - 2) { errno = ENOMEM; fail(base); exit(EXIT_FAILURE); }
+    char *p = allocate(a + b + 2);
+    snprintf(p, a + b + 2, "%s%s%s", base, a && base[a-1] == '/' ? "" : "/", name);
+    return p;
+}
+
+static void permissions(mode_t mode, char out[11])
+{
+    strcpy(out, "----------");
+    if (S_ISDIR(mode)) out[0] = 'd';
+    else if (S_ISLNK(mode)) out[0] = 'l';
+    else if (S_ISCHR(mode)) out[0] = 'c';
+    else if (S_ISBLK(mode)) out[0] = 'b';
+    else if (S_ISFIFO(mode)) out[0] = 'p';
+    else if (S_ISSOCK(mode)) out[0] = 's';
+    const mode_t bits[] = {S_IRUSR,S_IWUSR,S_IXUSR,S_IRGRP,S_IWGRP,S_IXGRP,S_IROTH,S_IWOTH,S_IXOTH};
+    for (size_t i = 0; i < 9; ++i)
+        if (mode & bits[i]) out[i+1] = "rwx"[i % 3];
+    if (mode & S_ISUID) out[3] = (mode & S_IXUSR) ? 's' : 'S';
+    if (mode & S_ISGID) out[6] = (mode & S_IXGRP) ? 's' : 'S';
+    if (mode & S_ISVTX) out[9] = (mode & S_IXOTH) ? 't' : 'T';
+}
+
+static char *owner_name(uid_t uid)
+{
+    struct passwd *pw = getpwuid(uid);
+    if (pw) return copy_string(pw->pw_name);
+    char buf[32];
+    snprintf(buf, sizeof buf, "%ju", (uintmax_t)uid);
+    return copy_string(buf);
+}
+
+static char *group_name(gid_t gid)
+{
+    struct group *gr = getgrgid(gid);
+    if (gr) return copy_string(gr->gr_name);
+    char buf[32];
+    snprintf(buf, sizeof buf, "%ju", (uintmax_t)gid);
+    return copy_string(buf);
+}
+
+static void timestamp(time_t modified, char out[13])
+{
+    /* ctime supplies "Www Mmm dd hh:mm:ss yyyy\n" in local time. */
+    const char *s = ctime(&modified);
+    if (!s) { strcpy(out, "????????????"); return; }
+    time_t now = time(NULL);
+    double age = difftime(now, modified);
+    if (age < 0 || age > 15552000.0)
+        snprintf(out, 13, "%.7s %.4s", s + 4, s + 20);
     else
-    {
-        for (int i = 1; i < argc; i++)
-        {
-            printf("Directory listing of %s : \n", argv[i]);
-            do_ls(argv[i]);
-	    puts("");
+        snprintf(out, 13, "%.12s", s + 4);
+}
+
+static void print_name(const char *name, const char *path)
+{
+    (void)path;
+    fputs(name, stdout);
+}
+
+static void print_link(const char *path)
+{
+    size_t capacity = 128;
+    for (;;) {
+        char *target = allocate(capacity + 1);
+        ssize_t n = readlink(path, target, capacity);
+        if (n < 0) { fail(path); free(target); return; }
+        if ((size_t)n < capacity) {
+            target[n] = '\0';
+            printf(" -> %s", target);
+            free(target);
+            return;
         }
+        free(target);
+        if (capacity > SIZE_MAX / 2 - 1) { errno = ENOMEM; fail(path); return; }
+        capacity *= 2;
     }
-    return 0;
+}
+
+typedef struct {
+    struct stat st;
+    char *path, *owner, *group;
+    char links[32], size[64];
+    int valid;
+} LongRow;
+
+static void show_long(char **names, size_t count, const char *base)
+{
+    LongRow *rows = allocate(count * sizeof *rows);
+    size_t link_width = 1, owner_width = 1, group_width = 1, size_width = 1;
+    intmax_t blocks = 0;
+    for (size_t i = 0; i < count; ++i) {
+        LongRow *r = &rows[i];
+        memset(r, 0, sizeof *r);
+        r->path = make_path(base, names[i]);
+        if (lstat(r->path, &r->st) < 0) { fail(r->path); continue; }
+        r->valid = 1;
+        r->owner = owner_name(r->st.st_uid);
+        r->group = group_name(r->st.st_gid);
+        snprintf(r->links, sizeof r->links, "%ju", (uintmax_t)r->st.st_nlink);
+        if (S_ISCHR(r->st.st_mode) || S_ISBLK(r->st.st_mode))
+            snprintf(r->size, sizeof r->size, "%u, %u", major(r->st.st_rdev), minor(r->st.st_rdev));
+        else snprintf(r->size, sizeof r->size, "%jd", (intmax_t)r->st.st_size);
+        if (strlen(r->links) > link_width) link_width = strlen(r->links);
+        if (strlen(r->owner) > owner_width) owner_width = strlen(r->owner);
+        if (strlen(r->group) > group_width) group_width = strlen(r->group);
+        if (strlen(r->size) > size_width) size_width = strlen(r->size);
+        blocks += r->st.st_blocks;
+    }
+    /* Linux st_blocks uses 512-byte units; ls displays 1 KiB by default. */
+    if (base) printf("total %jd\n", (blocks + 1) / 2);
+    for (size_t i = 0; i < count; ++i) {
+        LongRow *r = &rows[i];
+        if (r->valid) {
+            char mode[11], date[13];
+            permissions(r->st.st_mode, mode);
+            timestamp(r->st.st_mtime, date);
+            printf("%s %*s %-*s %-*s %*s %s ", mode,
+                   (int)link_width, r->links, (int)owner_width, r->owner,
+                   (int)group_width, r->group, (int)size_width, r->size, date);
+            print_name(names[i], r->path);
+            if (S_ISLNK(r->st.st_mode)) print_link(r->path);
+            putchar('\n');
+        }
+        free(r->path); free(r->owner); free(r->group);
+    }
+    free(rows);
+}
+
+static void display(char **names, size_t count, const char *base)
+{
+    if (long_format) show_long(names, count, base);
+    else for (size_t i = 0; i < count; ++i) {
+        char *path = make_path(base, names[i]);
+        print_name(names[i], path);
+        putchar('\n');
+        free(path);
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    int option;
+    while ((option = getopt(argc, argv, "l")) != -1) {
+        if (option == 'l') long_format = 1;
+        else { fprintf(stderr, "Usage: %s [-l] [FILE|DIRECTORY ...]\n", argv[0]); return 2; }
+    }
+    if (optind == argc) do_ls(".");
+    else for (int i = optind; i < argc; ++i) {
+        if (argc - optind > 1) {
+            if (i > optind) putchar('\n');
+            printf("%s:\n", argv[i]);
+        }
+        do_ls(argv[i]);
+    }
+    if (fflush(stdout) == EOF) { perror("ls: stdout"); return 1; }
+    return exit_status;
 }
 
 void do_ls(const char *dir)
 {
-    struct dirent *entry;
-    DIR *dp = opendir(dir);
-    if (dp == NULL)
-    {
-        fprintf(stderr, "Cannot open directory : %s\n", dir);
+    struct stat st;
+    if (lstat(dir, &st) < 0) { fail(dir); return; }
+    if (!S_ISDIR(st.st_mode)) {
+        char *name = (char *)dir;
+        display(&name, 1, NULL);
         return;
     }
-    errno = 0;
-    while ((entry = readdir(dp)) != NULL)
-    {
-        if (entry->d_name[0] == '.')
-            continue;
-        printf("%s\n", entry->d_name);
+    DIR *dp = opendir(dir);
+    if (!dp) { fail(dir); return; }
+    char **names = NULL;
+    size_t count = 0, capacity = 0;
+    struct dirent *entry;
+    /* Reset errno immediately before readdir, independently of other calls. */
+    for (;;) {
+        errno = 0;
+        entry = readdir(dp);
+        if (!entry) { if (errno) fail(dir); break; }
+        if (entry->d_name[0] == '.') continue;
+        if (count == capacity) {
+            if (capacity > SIZE_MAX / 2 / sizeof *names) {
+                errno = ENOMEM; perror("ls"); exit(EXIT_FAILURE);
+            }
+            capacity = capacity ? capacity * 2 : 32;
+            char **next = realloc(names, capacity * sizeof *names);
+            if (!next) { perror("ls: realloc"); exit(EXIT_FAILURE); }
+            names = next;
+        }
+        names[count++] = copy_string(entry->d_name);
     }
-
-    if (errno != 0)
-    {
-        perror("readdir failed");
-    }
-
-    closedir(dp);
+    if (closedir(dp) < 0) fail(dir);
+    display(names, count, dir);
+    for (size_t i = 0; i < count; ++i) free(names[i]);
+    free(names);
 }
