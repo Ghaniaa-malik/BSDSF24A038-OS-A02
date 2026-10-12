@@ -1,0 +1,22 @@
+name: Linux build and tests
+on:
+  push:
+    branches: ['main', 'feature-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with warnings as errors
+        run: make CFLAGS='-std=c11 -Wall -Wextra -Wpedantic -Werror -O2'
+      - name: Run tests
+        run: |
+          ./bin/ls src
+          if test -f tests/test_ls.py; then make test; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ls-linux-x86_64
+          path: bin/ls

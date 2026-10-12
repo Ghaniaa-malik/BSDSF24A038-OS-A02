@@ -1,0 +1,7 @@
+/bin/*
+!/bin/.gitkeep
+/obj/*
+!/obj/.gitkeep
+/.work/
+/PA-02.pdf
+__pycache__/
