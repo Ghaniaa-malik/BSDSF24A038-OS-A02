@@ -67,3 +67,27 @@ getopt processes each option in order: -l sets LONG and -x sets HORIZONTAL, so t
 last display option wins, including combined flags (-xl means long; -lx means
 horizontal). display() dispatches once to show_long(), show_horizontal() or
 show_vertical(). A later independent recursive_flag can combine with any layout.
+
+## Feature 5: Alphabetical sorting (v1.4.0)
+
+### 7. Why collect entries before sorting?
+
+readdir yields filesystem order, not lexical order. A name read later could precede
+every name already printed, and stdout cannot retract output. We store copied
+names in a dynamically grown char-pointer array, qsort it, then call the same
+display functions. Names must be copied because readdir's storage may be reused.
+This requires O(n + total filename bytes) memory, plus long-listing metadata when
+requested. Huge directories can exhaust memory and delay the first output. External
+sorting could trade disk I/O for lower memory use. Growth is checked for allocation
+failure; all names and the array are freed after display and child traversal.
+
+### 8. qsort comparator
+
+The signature is `int compare_names(const void *a, const void *b)`. qsort is generic:
+it knows the element count and size, but not the element type, so it passes untyped
+pointers to two elements. Here an element is a char pointer; cast each argument to
+`const char *const *`, dereference once, and return strcmp(*left, *right). Negative,
+zero and positive results mean before, equal and after. Do not subtract pointers
+or assume strcmp returns exactly -1 or +1. qsort is called before any display mode,
+so all modes share the same order. strcmp gives case-sensitive byte order, matching
+GNU ls under LC_ALL=C, rather than locale-aware dictionary collation.

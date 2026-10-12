@@ -260,6 +260,14 @@ int main(int argc, char *argv[])
     return exit_status;
 }
 
+/* qsort passes pointers to array elements, hence pointers to char pointers. */
+static int compare_names(const void *a, const void *b)
+{
+    const char *const *left = a;
+    const char *const *right = b;
+    return strcmp(*left, *right);
+}
+
 void do_ls(const char *dir)
 {
     struct stat st;
@@ -292,6 +300,7 @@ void do_ls(const char *dir)
         names[count++] = copy_string(entry->d_name);
     }
     if (closedir(dp) < 0) fail(dir);
+    if (count > 1) qsort(names, count, sizeof *names, compare_names);
     display(names, count, dir);
     for (size_t i = 0; i < count; ++i) free(names[i]);
     free(names);
