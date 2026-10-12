@@ -91,3 +91,27 @@ zero and positive results mean before, equal and after. Do not subtract pointers
 or assume strcmp returns exactly -1 or +1. qsort is called before any display mode,
 so all modes share the same order. strcmp gives case-sensitive byte order, matching
 GNU ls under LC_ALL=C, rather than locale-aware dictionary collation.
+
+## Feature 6: Colors (v1.5.0)
+
+### 9. ANSI color sequences
+
+A terminal interprets ESC followed by `[` and SGR parameters ending in `m` as a
+style change rather than visible letters. For example,
+`printf("\033[0;32mgreen text\033[0m");` selects green, writes the text, then resets
+the style. Omitting reset would color later output too. The program uses blue
+(0;34) for directories, green (0;32) for executable regular files, red (0;31) for
+.tar/.gz/.zip archives, pink/magenta (0;35) for links, and reverse video (7) for
+special files. Type takes priority over extension; executable archives are green.
+Suffix comparisons avoid mistaking archive.zip.txt for a zip. Colors are emitted
+in all modes, including redirected output, as requested by the assignment. Escape
+sequences do not contribute to filename length or padding.
+
+### 10. Execute permission bits
+
+S_IXUSR, S_IXGRP and S_IXOTH represent execute permission for owner, group and
+others. `(mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0` detects at least one execute
+bit. The OR constructs a mask; AND retains only those bits. This describes the
+file's mode, not whether the current user can execute it: ACLs, mount options and
+credentials can change effective access. Check regular-file type first, because
+execute bits on a directory represent search/traversal, and directories stay blue.

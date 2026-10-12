@@ -103,10 +103,32 @@ static void timestamp(time_t modified, char out[13])
         snprintf(out, 13, "%.12s", s + 4);
 }
 
+#define BLUE "\033[0;34m"
+#define GREEN "\033[0;32m"
+#define RED "\033[0;31m"
+#define PINK "\033[0;35m"
+#define REVERSE "\033[7m"
+#define RESET "\033[0m"
+
+static int is_archive(const char *name)
+{
+    const char *extension = strrchr(name, '.');
+    return extension && (!strcmp(extension, ".tar") || !strcmp(extension, ".gz") || !strcmp(extension, ".zip"));
+}
+
 static void print_name(const char *name, const char *path)
 {
-    (void)path;
+    struct stat st;
+    const char *color = "";
+    if (lstat(path, &st) < 0) fail(path);
+    else if (S_ISDIR(st.st_mode)) color = BLUE;
+    else if (S_ISLNK(st.st_mode)) color = PINK;
+    else if (!S_ISREG(st.st_mode)) color = REVERSE;
+    else if (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) color = GREEN;
+    else if (is_archive(name)) color = RED;
+    fputs(color, stdout);
     fputs(name, stdout);
+    if (*color) fputs(RESET, stdout);
 }
 
 static void print_link(const char *path)
